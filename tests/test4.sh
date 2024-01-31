@@ -26,7 +26,15 @@ for data in /sys/module/dmp/stat/*; do
 done
 
 dmsetup remove dmp1
-dmsetup remove dmp2
-
 dmsetup remove zero1
+
+echo "In stat after removing dmp1:"
+
+for data in /sys/module/dmp/stat/*; do
+  echo "$data:"
+  cat "$data"
+  echo
+done
+
+dmsetup remove dmp2
 dmsetup remove zero2

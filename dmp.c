@@ -11,6 +11,7 @@ struct dmp_data {
     struct dm_dev *dev;
     sector_t start;
 
+    // Attribute for file in dmp/stat
     struct kobj_attribute attr;
 
     unsigned long long reads;
@@ -19,6 +20,7 @@ struct dmp_data {
     unsigned long long write_blocks_size;
 };
 
+// dmp/stat directory
 static struct kobject *stats_kobj;
 
 static ssize_t show_dmp_stat(struct kobject *kobj, struct kobj_attribute *attr, char *buf) {
@@ -28,7 +30,7 @@ static ssize_t show_dmp_stat(struct kobject *kobj, struct kobj_attribute *attr, 
     const unsigned long long total_reqs = data->reads + data->writes;
     const unsigned long long avg_total =
         total_reqs == 0 ? 0 : (data->read_blocks_size + data->write_blocks_size) / total_reqs;
-    // Result string is definitely less than PAGE_SIZE
+    // Result string is definitely less than PAGE_SIZE, so no need to check buffer overflow
     return sysfs_emit(buf,
         "read:\n"
         "  reqs: %llu\n"
@@ -50,12 +52,10 @@ static int dmp_map(struct dm_target *ti, struct bio *bio) {
 
     switch (bio_op(bio)) {
     case REQ_OP_READ:
-        printk(KERN_INFO "Read\n");
         my_data->reads++;
         my_data->read_blocks_size += bio->bi_iter.bi_size;
         break;
     case REQ_OP_WRITE:
-        printk(KERN_INFO "Write\n");
         my_data->writes++;
         my_data->write_blocks_size += bio->bi_iter.bi_size;
         break;
@@ -87,14 +87,14 @@ static int dmp_target_ctr(struct dm_target *ti, unsigned int argc, char **argv) 
     printk(KERN_INFO "dmp: construct");
 
     if (argc != 1) {
-        printk(KERN_CRIT "dmp: required two args, got %d", argc);
+        printk(KERN_CRIT "dmp: required one argument, got %d\n", argc);
         ti->error = "Invalid argument count";
         return -EINVAL;
     }
 
     struct dmp_data *data = kmalloc(sizeof(struct dmp_data), GFP_KERNEL);
     if (data == NULL) {
-        printk(KERN_ERR "dmp: kmalloc failed");
+        printk(KERN_ERR "dmp: kmalloc failed\n");
         ti->error = "kmalloc returned NULL";
         return -ENOMEM;
     }
@@ -106,21 +106,21 @@ static int dmp_target_ctr(struct dm_target *ti, unsigned int argc, char **argv) 
 
     int ret = dm_get_device(ti, argv[0], dm_table_get_mode(ti->table), &data->dev);
     if (ret) {
-        printk(KERN_ERR "dmp: lookup failed");
+        printk(KERN_ERR "dmp: lookup failed\n");
         ti->error = "Device lookup failed";
         goto bad;
     }
     ret = init_dmp_attribute(data);
     if (ret) {
-        printk(KERN_ERR "dmp: attribute alloc failed");
+        printk(KERN_ERR "dmp: attribute alloc failed\n");
         ti->error = "Attribute allocation failed";
         goto bad;
     }
     ret = sysfs_create_file(stats_kobj, &data->attr.attr);
     if (ret) {
-        printk(KERN_ERR "dmp: attribute creation failed");
+        printk(KERN_ERR "dmp: attribute creation failed\n");
         ti->error = "Attribute creation failed";
-        kfree(data->attr.attr.name); // free data
+        kfree(data->attr.attr.name); // attribute name is already allocated
         goto bad;
     }
 
@@ -135,19 +135,15 @@ static int dmp_target_ctr(struct dm_target *ti, unsigned int argc, char **argv) 
 static void dmp_target_dtr(struct dm_target *ti) {
     struct dmp_data *data = ti->private;
 
-    printk(KERN_INFO "dmp: destruct\n"
-                     "Total info: %llu reads, %llu writes\n"
-                     "            %llu bytes read, %llu bytes wrote\n",
-        data->reads, data->writes,
-        data->read_blocks_size, data->write_blocks_size);
+    printk(KERN_INFO "dmp: destruct\n");
     // First delete attribute
     sysfs_remove_file(stats_kobj, &data->attr.attr);
-    kfree(data->attr.attr.name); // we allocated this field
+    kfree(data->attr.attr.name); // we allocated this field, now free it
 
     // Put device
     dm_put_device(ti, data->dev);
-    // Now device is destructed and we need to free object by putting the kobject
 
+    // Now device is destructed and we need to free data
     kfree(data);
 }
 
@@ -162,9 +158,10 @@ static struct target_type dmp_target = {
 
 
 static int init_dmp(void) {
-    int result = dm_register_target(&dmp_target);
+    const int result = dm_register_target(&dmp_target);
     if (result < 0) {
-        DMERR("Registration failed: %d", result);
+        printk(KERN_ERR "dmp module registration failed: can't register(%d)\n", result);
+        return result;
     }
     stats_kobj = kobject_create_and_add("stat", &(THIS_MODULE)->mkobj.kobj);
     if (stats_kobj == 0) {
@@ -173,7 +170,7 @@ static int init_dmp(void) {
         return -ENOMEM;
     }
     printk(KERN_INFO "dmp module registration result: %d\n", result);
-    return result;
+    return 0;
 }
 
 static void unload_dmp(void) {

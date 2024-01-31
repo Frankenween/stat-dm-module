@@ -1,20 +1,22 @@
 #!/bin/bash
 
 echo
-echo "Test 5: data transfer from device correctness"
+echo "Test 6: data transfer to device correctness"
 
 SIZE=50
 SECTORS=$((SIZE * 2))
 
 inp_data=$(mktemp)
+out_data=$(mktemp)
+
 dd if=/dev/random of="$inp_data" bs="${SIZE}k" count=1
-loop_device=$(losetup --find --show "$inp_data")
+dd if=/dev/zero   of="$out_data" bs="${SIZE}k" count=1
+
+loop_device=$(losetup --find --show "$out_data")
 
 dmsetup create dmp_loop --table "0 $SECTORS dmp $loop_device"
 
-out_data=$(mktemp)
-
-dd if=/dev/mapper/dmp_loop of="$out_data"
+dd of=/dev/mapper/dmp_loop if="$inp_data"
 
 echo
 echo "In stat:"
